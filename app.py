@@ -26,14 +26,36 @@ except ImportError:
 def fetch_stock_data(ticker: str, period: str = "1mo", interval: str = "1d"):
     """Fetch stock data via yfinance with 60s cache."""
     try:
-        data = yf.download(ticker, period=period, interval=interval, progress=False)
+        t = yf.Ticker(ticker)
+        data = t.history(period=period, interval=interval)
         if data.empty:
             return None
-        # Flatten multi-level columns if present
+        # Ensure we have the expected columns
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
-        data.index = data.index.tz_localize(None)
-        return data
+        # Remove timezone info from index
+        if data.index.tz is not None:
+            data.index = data.index.tz_localize(None)
+        # Ensure standard column names exist
+        col_map = {}
+        for col in data.columns:
+            col_lower = str(col).lower().strip()
+            if "open" in col_lower:
+                col_map[col] = "Open"
+            elif "high" in col_lower:
+                col_map[col] = "High"
+            elif "low" in col_lower:
+                col_map[col] = "Low"
+            elif "close" in col_lower and "adj" not in col_lower:
+                col_map[col] = "Close"
+            elif "volume" in col_lower:
+                col_map[col] = "Volume"
+        if col_map:
+            data = data.rename(columns=col_map)
+        required = {"Open", "High", "Low", "Close", "Volume"}
+        if not required.issubset(set(data.columns)):
+            return None
+        return data[list(required)]
     except Exception as e:
         st.error(f"Error fetching {ticker}: {e}")
         return None
@@ -45,6 +67,8 @@ def fetch_stock_info(ticker: str):
     try:
         t = yf.Ticker(ticker)
         info = t.info
+        if not info or len(info) < 5:
+            return {}
         return info
     except Exception:
         return {}
